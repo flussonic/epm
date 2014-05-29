@@ -293,7 +293,10 @@ debian_conf_files(#fpm{config_files = Conf}) ->
 
 debian_control_content(#fpm{name = Name, version = Version, maintainer = Maintainer, conflicts = Conflicts,
   arch = Arch,
-  replaces = Replaces, category = Category, url = URL, description = Description}) ->
+  replaces = Replaces, category = Category, url = URL, description = Description, paths = Paths}) ->
+  InstalledSize = lists:sum([
+    filelib:fold_files(Path,".*", true, fun(FileName, AccIn) -> filelib:file_size(FileName) + AccIn end, 0)
+  || Path <- Paths ]) div 1024,
   Content = [
   debian_header("Package", Name),
   debian_header("Version", Version),
@@ -305,7 +308,8 @@ debian_control_content(#fpm{name = Name, version = Version, maintainer = Maintai
   debian_header("Section",Category),
   debian_header("Priority", "extra"),
   debian_header("Homepage", URL),
-  debian_header("Description", Description)
+  debian_header("Description", Description),
+  debian_header("Installed-Size", integer_to_list(InstalledSize))
   ],
   iolist_to_binary(Content).
 
