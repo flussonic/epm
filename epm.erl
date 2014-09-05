@@ -295,7 +295,12 @@ debian_control_content(#fpm{name = Name, version = Version, maintainer = Maintai
   arch = Arch,
   replaces = Replaces, category = Category, url = URL, description = Description, paths = Paths}) ->
   InstalledSize = lists:sum([
-    filelib:fold_files(Path,".*", true, fun(FileName, AccIn) -> filelib:file_size(FileName) + AccIn end, 0)
+    fold_dir(Path, fun(FileName, AccIn) ->
+      case filelib:is_regular(FileName) of
+        true  -> filelib:file_size(FileName) + AccIn;
+        false -> AccIn
+      end
+    end, 0)
   || Path <- Paths ]) div 1024,
   Content = [
   debian_header("Package", Name),
@@ -346,7 +351,7 @@ debian_lookup_files([], Set) ->
   lists:usort(sets:to_list(Set));
 
 debian_lookup_files([Dir|Dirs], Set) ->
-  Set1 = filelib:fold_files(Dir, ".*", true, fun(Path, Acc) ->
+  Set1 = fold_dir(Dir, fun(Path, Acc) ->
     debian_add_recursive_path(Path, Acc)
   end, Set),
   debian_lookup_files(Dirs, Set1).
@@ -533,7 +538,7 @@ rpm_load_file_list(Dirs) ->
   Files2.
 
 rpm_list(Dir) ->
-  Files1 = filelib:fold_files(Dir, ".*", true, fun(P,L) -> [list_to_binary(P)|L] end, []),
+  Files1 = fold_dir(Dir, fun(P,L) -> [list_to_binary(P)|L] end, []),
   Files2 = lists:filter(fun(Path) -> 
     {ok, #file_info{type = T}} = file:read_file_info(Path),
     T == regular
@@ -995,11 +1000,24 @@ Options:
 
 ").
 
+fold_dir(Dir, Fun, Acc) ->
+  case filelib:is_dir(Dir) of
+    true  -> do_fold_dir([Dir], Fun, Acc);
+    false -> Acc
+  end.
 
-
-
-
-
-
-
-
+do_fold_dir([], _Fun, Acc) -> Acc;
+do_fold_dir([Path|Paths], Fun, Acc) ->
+  NewAcc = case string:chr(Path, $/) of
+             0 -> Acc;
+             _ -> Fun(Path, Acc)
+           end,
+  do_fold_dir(Paths, Fun,
+              case filelib:is_dir(Path) of
+                true ->
+                  {ok, Filenames} = file:list_dir(Path),
+                  SubPaths = [filename:join(Path, Name) || Name <- Filenames],
+                  do_fold_dir(SubPaths, Fun, NewAcc);
+                false ->
+                  NewAcc
+              end).
