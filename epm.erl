@@ -14,6 +14,7 @@
   vendor,
   category,
   depends = [],
+  provides = [],
   url,
   description = "no description",
   maintainer,
@@ -142,6 +143,10 @@ parse_args(["--depends", Dep|Args], #fpm{depends = Deps} = State) ->
 
 parse_args(["-d", Dep|Args], #fpm{depends = Deps} = State) ->
   parse_args(Args, State#fpm{depends = Deps ++ [Dep]});
+
+
+parse_args(["--provides", P|Args], #fpm{provides = Provides} = State) ->
+  parse_args(Args, State#fpm{provides = Provides ++ [P]});
 
 
 parse_args(["--conflicts", V|Args], #fpm{conflicts = R} = State) ->
@@ -393,7 +398,7 @@ tar() ->
 
 
 
-rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version = Version0, arch = Arch0, release = Release0} = FPM) ->
+rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version = Version0, arch = Arch0, release = Release0, provides = Provides0} = FPM) ->
   Arch1 = case Arch0 of
     "amd64" -> "x86_64";
     _ -> Arch0
@@ -424,6 +429,11 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
   Arch = iolist_to_binary(Arch1),
   Release = iolist_to_binary(Release1),
 
+  Provides = case Provides0 of
+    [] -> [Name];
+    _ -> [iolist_to_binary(P) || P <- Provides0]
+  end,
+
   % It is a problem: how to store directory names. RPM requires storing them in "/etc/"  and "flussonic.conf"
   % cpio required: "etc/flussonic.conf"
   Dirs = lists:map(fun
@@ -449,7 +459,7 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
 
   Info2 = [{K,iolist_to_binary(V)} || {K,V} <- Info1, V =/= undefined],
 
-  HeaderAddedTags = Info2 ++ [{name,Name},{version,Version},{release,Release},{arch,Arch},{size,iolist_size(CPIO)}],
+  HeaderAddedTags = Info2 ++ [{name,Name},{version,Version},{release,Release},{arch,Arch},{providename,Provides},{size,iolist_size(CPIO)}],
 
   #fpm{post_install=PostInst,pre_uninstall=PreRm,post_uninstall=PostRm}=FPM,
   #fpm{epoch = Epoch}=FPM,
