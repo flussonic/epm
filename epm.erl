@@ -433,11 +433,7 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
     [] -> [Name];
     _ -> [iolist_to_binary(P) || P <- Provides0]
   end,
-  Deps1 = case Deps0 of
-    [] -> [<<"/bin/sh">>];
-    _ -> [iolist_to_binary(D) || D <- Deps0]
-  end,
-  Deps = lists:map(
+  Deps1 = lists:map(
            fun(X) ->
                    case re:split(X, "([ ><=])") of
                        [X] -> {X, 0, <<>>};
@@ -452,7 +448,8 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
                            {DepName, T2, V}
                    end
            end,
-           Deps1),
+           [iolist_to_binary(D) || D <- Deps0]),
+  Deps = [{<<"/bin/sh">>, 768 bor 1280 bor 2304 bor 4352, <<>>} | Deps1],
 
   % It is a problem: how to store directory names. RPM requires storing them in "/etc/"  and "flussonic.conf"
   % cpio required: "etc/flussonic.conf"
