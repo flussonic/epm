@@ -423,7 +423,7 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
     {error, Error} ->
       fpm_error("Error: cannot access output file '~s': ~p", [RPMPath, Error])
   end,
-  
+
   Name = iolist_to_binary(Name0),
   Version = iolist_to_binary(Version0),
   Arch = iolist_to_binary(Arch1),
@@ -433,10 +433,24 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
     [] -> [Name];
     _ -> [iolist_to_binary(P) || P <- Provides0]
   end,
-  Deps = case Deps0 of
+  Deps1 = case Deps0 of
     [] -> [<<"/bin/sh">>];
     _ -> [iolist_to_binary(D) || D <- Deps0]
   end,
+  Deps = lists:map(
+           fun(X) ->
+                   case re:split(X, "([ ><=])") of
+                       [X] -> {X, 0, <<>>};
+                       [DepName | T] ->
+                           [V | T1] = lists:reverse(T),
+                           T2=case re:replace(iolist_to_binary(lists:reverse(T1))," ","",[global]) of
+                                  <<">=">>  -> 16777226;
+                                  _         -> 0
+                              end,
+                           {DepName, T2, V}
+                   end
+           end,
+           Deps1),
 
   % It is a problem: how to store directory names. RPM requires storing them in "/etc/"  and "flussonic.conf"
   % cpio required: "etc/flussonic.conf"
@@ -463,13 +477,15 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
 
   Info2 = [{K,iolist_to_binary(V)} || {K,V} <- Info1, V =/= undefined],
 
-  HeaderAddedTags = Info2 ++ [{name,Name},
-                              {version,Version},
-                              {release,Release},
-                              {arch,Arch},
-                              {providename,Provides},
-                              {requirename,Deps},
-                              {size,iolist_size(CPIO)}],
+  HeaderAddedTags = Info2 ++ [{name,        Name},
+                              {version,     Version},
+                              {release,     Release},
+                              {arch,        Arch},
+                              {providename, Provides},
+                              {requirename, [X || {X, _, _} <- Deps]},
+                              {requireversion, [X || {_, _, X} <- Deps]},
+                              {requireflags, [X || {_, X, _} <- Deps]},
+                              {size,        iolist_size(CPIO)}],
 
   #fpm{post_install=PostInst,pre_uninstall=PreRm,post_uninstall=PostRm}=FPM,
   #fpm{epoch = Epoch}=FPM,
@@ -697,7 +713,7 @@ rpm_header(Addons, Files) ->
   Headers = [
     {headeri18ntable, [<<"C">>]}
     ] ++
-      Addons ++ 
+      Addons ++
     [
     {buildtime, utc(erlang:universaltime())},
     {os, <<"linux">>},
