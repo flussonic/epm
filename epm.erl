@@ -443,10 +443,12 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
                        [X] -> {X, 0, <<>>};
                        [DepName | T] ->
                            [V | T1] = lists:reverse(T),
-                           T2=case re:replace(iolist_to_binary(lists:reverse(T1))," ","",[global]) of
-                                  <<">=">>  -> 16777226;
-                                  _         -> 0
-                              end,
+                           TypeBit = case DepName of
+                                         <<"rpmlib(", _/binary>>     -> (1 bsl 24) bor (1 bsl 6);
+                                         <<"rpmconfig(", _/binary>>  -> 1 bsl 28;
+                                         _                          -> 0
+                                     end,
+                           T2 = rpm_convert_to_sense(iolist_to_binary(T1), TypeBit),
                            {DepName, T2, V}
                    end
            end,
@@ -508,7 +510,7 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
 
 
   GPGSign = case FPM#fpm.gpg of
-    undefined -> 
+    undefined ->
       [];
     GPG ->
       file:write_file("signed-data", [Header, CPIO]),
@@ -561,7 +563,16 @@ rpm_lead(Name) ->
   96 = size(Lead),
   Lead.
 
-
+rpm_convert_to_sense(<<$<, Chars/binary>>, Bits) ->
+    rpm_convert_to_sense(Chars, Bits bor (1 bsl 1));
+rpm_convert_to_sense(<<$>, Chars/binary>>, Bits) ->
+    rpm_convert_to_sense(Chars, Bits bor (1 bsl 2));
+rpm_convert_to_sense(<<$=, Chars/binary>>, Bits) ->
+    rpm_convert_to_sense(Chars, Bits bor (1 bsl 3));
+rpm_convert_to_sense(<<>>, Bits) ->
+    Bits;
+rpm_convert_to_sense(<<_, Chars/binary>>, Bits) ->
+    rpm_convert_to_sense(Chars, Bits).
 
 rpm_signatures(Headers) ->
   {_Magic,Index0, Data0} = rpm_pack_header(Headers),
