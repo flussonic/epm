@@ -15,6 +15,7 @@
   category,
   depends = [],
   provides = [],
+  buildhost = "localhost",
   url,
   description = "no description",
   maintainer,
@@ -398,7 +399,7 @@ tar() ->
 
 
 
-rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version = Version0, arch = Arch0, release = Release0, provides = Provides0, depends = Deps0} = FPM) ->
+rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version = Version0, arch = Arch0, release = Release0, provides = Provides0, depends = Deps0, buildhost = BHost0} = FPM) ->
   Arch1 = case Arch0 of
     "amd64" -> "x86_64";
     _ -> Arch0
@@ -428,6 +429,7 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
   Version = iolist_to_binary(Version0),
   Arch = iolist_to_binary(Arch1),
   Release = iolist_to_binary(Release1),
+  BHost = iolist_to_binary(BHost0),
 
   Provides = case Provides0 of
     [] -> [Name];
@@ -466,7 +468,7 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
   Info1 = [
     {summary, FPM#fpm.description},
     {description, FPM#fpm.description},
-    % {buildhost, <<"dev.flussonic.com">>},
+    {buildhost, BHost},
     {vendor, FPM#fpm.vendor},
     {license, FPM#fpm.license},
     {packager, FPM#fpm.maintainer},
