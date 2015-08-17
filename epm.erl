@@ -199,9 +199,6 @@ parse_args(["--pre-uninstall", V|Args], #fpm{} = State) ->
   end;
 
 
-
-
-
 parse_args(["--"++Option, _V|Args], #fpm{} = State) ->
   io:format("unknown option '~s'\n", [Option]),
   parse_args(Args, State);
@@ -454,7 +451,23 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
 
   HeaderAddedTags = Info2 ++ [{name,Name},{version,Version},{release,Release},{arch,Arch},{size,iolist_size(CPIO)}],
 
-  Header = rpm_header(HeaderAddedTags, Files),
+  #fpm{post_install=PostInst,pre_uninstall=PreRm,post_uninstall=PostRm}=FPM,
+  #fpm{epoch = Epoch}=FPM,
+  HeaderAddedTags2 = lists:foldl(fun
+          ({T, V}, Acc) when V /= undefined ->
+            [{T, V} | Acc];
+          (_, Acc) -> Acc
+    end, HeaderAddedTags,
+        [
+            {postinstall, set_scriptlet_env(Name, Version, PostInst)},
+            {preuninstall, set_scriptlet_env(Name, Version, PreRm)},
+            {postuninstall, set_scriptlet_env(Name, Version, PostRm)},
+            {epoch, Epoch}
+        ]),
+
+  HeaderAddedTags3 = HeaderAddedTags2 ++ rpm_depends_tags(FPM),
+
+  Header = rpm_header(HeaderAddedTags3, Files),
   MD5 = crypto:hash(md5, [Header, CPIO]),
 
 
@@ -609,6 +622,49 @@ cpio_pack(Name, Size, Inode, Mode) ->
   to_b(iolist_size(Name)+1), to_b(0), Name, 0, binary:copy(<<0>>, cpio_pad4(iolist_size(Name) + 1 + 110))].
 
 
+rpm_depends_tags(#fpm{depends=Depends}) ->
+    Deps = lists:foldl(fun(Depend, Acc) ->
+            case rpm_parse_depend(Depend) of
+                undefined -> Acc;
+                V -> [V | Acc]
+            end
+        end, [], Depends),
+    case lists:unzip3(Deps) of
+        {[], _, _} -> [];
+        {Names, Versions, Flags} ->
+            [
+                {requirename, Names},
+                {requireversion, Versions},
+                {requireflags, Flags}
+            ]
+    end.
+
+rpm_attr_calc([], Acc) -> Acc;
+rpm_attr_calc([$< | T], Acc) -> rpm_attr_calc(T, Acc + 2);
+rpm_attr_calc([$> | T], Acc) -> rpm_attr_calc(T, Acc + 4);
+rpm_attr_calc([$= | T], Acc) -> rpm_attr_calc(T, Acc + 8).
+
+rpm_parse_depend(L) ->
+    Trim = fun(V) -> string:strip(V, both, 32) end,
+    Bin = fun(V) ->
+        list_to_binary(Trim(V))
+    end,
+    Attr = fun(V) ->
+        T = Trim(V),
+        case length(T) > 2 of
+            true -> undefined;
+            false -> rpm_attr_calc(T, 0)
+        end
+    end,
+    case re:run(Trim(L),"^([^<=>]+)(([<=>]+)(.+))?$",[global,{capture,all,list}]) of
+        {match, [[_, Name]]} -> {Bin(Name), <<>>, 0};
+        {match, [[_, Name, _, Op, Version]]} ->
+            case Attr(Op) of
+                undefined -> undefined;
+                V -> {Bin(Name), Bin(Version), V}
+            end;
+        _ -> undefined
+    end.
 
 rpm_header(Addons, Files) ->
   Infos = [begin
@@ -637,11 +693,6 @@ rpm_header(Addons, Files) ->
     {filelinktos, [<<>> || _ <- Files]},
     {filerdevs, [0 || _ <- Files]},
 
-    % {requirename,[<<"/bin/bash">>, <<"rpmlib(CompressedFileNames)">>,
-    %                  <<"rpmlib(FileDigests)">>,
-    %                  <<"rpmlib(PayloadFilesHavePrefix)">>,
-    %                  <<"rpmlib(PayloadIsXz)">>]},
-    % {requireversion,[<<>>,<<"3.0.4-1">>,<<"4.6.0-1">>,<<"4.0-1">>,<<"5.2-1">>]},
     {rpmversion, <<"4.8.0">>},
     {fileinodes, [inode(F) || F <- Files]},
     {filelangs, [<<>> || _ <- Files]},
@@ -1021,3 +1072,11 @@ do_fold_dir([Path|Paths], Fun, Acc) ->
                 false ->
                   NewAcc
               end).
+
+set_scriptlet_env(Name, Version, Script) when is_binary(Script) ->
+    <<
+        "RPM_PACKAGE_NAME=", Name/binary, 10,
+        "RPM_PACKAGE_VERSION=", Version/binary, 10,
+        Script/binary
+    >>;
+set_scriptlet_env(_, _, Script) -> Script.
