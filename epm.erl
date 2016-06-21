@@ -14,6 +14,8 @@
   vendor,
   category,
   depends = [],
+  provides = [],
+  buildhost = "localhost",
   url,
   description = "no description",
   maintainer,
@@ -142,6 +144,10 @@ parse_args(["--depends", Dep|Args], #fpm{depends = Deps} = State) ->
 
 parse_args(["-d", Dep|Args], #fpm{depends = Deps} = State) ->
   parse_args(Args, State#fpm{depends = Deps ++ [Dep]});
+
+
+parse_args(["--provides", P|Args], #fpm{provides = Provides} = State) ->
+  parse_args(Args, State#fpm{provides = Provides ++ [P]});
 
 
 parse_args(["--conflicts", V|Args], #fpm{conflicts = R} = State) ->
@@ -393,7 +399,7 @@ tar() ->
 
 
 
-rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version = Version0, arch = Arch0, release = Release0} = FPM) ->
+rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version = Version0, arch = Arch0, release = Release0, provides = Provides0, depends = Deps0, buildhost = BHost0} = FPM) ->
   Arch1 = case Arch0 of
     "amd64" -> "x86_64";
     _ -> Arch0
@@ -418,11 +424,34 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
     {error, Error} ->
       fpm_error("Error: cannot access output file '~s': ~p", [RPMPath, Error])
   end,
-  
+
   Name = iolist_to_binary(Name0),
   Version = iolist_to_binary(Version0),
   Arch = iolist_to_binary(Arch1),
   Release = iolist_to_binary(Release1),
+  BHost = iolist_to_binary(BHost0),
+
+  Provides = case Provides0 of
+    [] -> [Name];
+    _ -> [iolist_to_binary(P) || P <- Provides0]
+  end,
+  Deps1 = lists:map(
+           fun(X) ->
+                   case re:split(X, "([ ><=])") of
+                       [X] -> {X, 0, <<>>};
+                       [DepName | T] ->
+                           [V | T1] = lists:reverse(T),
+                           TypeBit = case DepName of
+                                         <<"rpmlib(", _/binary>>     -> (1 bsl 24) bor (1 bsl 6);
+                                         <<"rpmconfig(", _/binary>>  -> 1 bsl 28;
+                                         _                          -> 0
+                                     end,
+                           T2 = rpm_convert_to_sense(iolist_to_binary(T1), TypeBit),
+                           {DepName, T2, V}
+                   end
+           end,
+           [iolist_to_binary(D) || D <- Deps0]),
+  Deps = [{<<"/bin/sh">>, 768 bor 1280 bor 2304 bor 4352, <<>>} | Deps1],
 
   % It is a problem: how to store directory names. RPM requires storing them in "/etc/"  and "flussonic.conf"
   % cpio required: "etc/flussonic.conf"
@@ -439,7 +468,7 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
   Info1 = [
     {summary, FPM#fpm.description},
     {description, FPM#fpm.description},
-    % {buildhost, <<"dev.flussonic.com">>},
+    {buildhost, BHost},
     {vendor, FPM#fpm.vendor},
     {license, FPM#fpm.license},
     {packager, FPM#fpm.maintainer},
@@ -449,7 +478,15 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
 
   Info2 = [{K,iolist_to_binary(V)} || {K,V} <- Info1, V =/= undefined],
 
-  HeaderAddedTags = Info2 ++ [{name,Name},{version,Version},{release,Release},{arch,Arch},{size,iolist_size(CPIO)}],
+  HeaderAddedTags = Info2 ++ [{name,        Name},
+                              {version,     Version},
+                              {release,     Release},
+                              {arch,        Arch},
+                              {providename, Provides},
+                              {requirename, [X || {X, _, _} <- Deps]},
+                              {requireversion, [X || {_, _, X} <- Deps]},
+                              {requireflags, [X || {_, X, _} <- Deps]},
+                              {size,        iolist_size(CPIO)}],
 
   #fpm{post_install=PostInst,pre_uninstall=PreRm,post_uninstall=PostRm}=FPM,
   #fpm{epoch = Epoch}=FPM,
@@ -472,7 +509,7 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
 
 
   GPGSign = case FPM#fpm.gpg of
-    undefined -> 
+    undefined ->
       [];
     GPG ->
       file:write_file("signed-data", [Header, CPIO]),
@@ -525,7 +562,16 @@ rpm_lead(Name) ->
   96 = size(Lead),
   Lead.
 
-
+rpm_convert_to_sense(<<$<, Chars/binary>>, Bits) ->
+    rpm_convert_to_sense(Chars, Bits bor (1 bsl 1));
+rpm_convert_to_sense(<<$>, Chars/binary>>, Bits) ->
+    rpm_convert_to_sense(Chars, Bits bor (1 bsl 2));
+rpm_convert_to_sense(<<$=, Chars/binary>>, Bits) ->
+    rpm_convert_to_sense(Chars, Bits bor (1 bsl 3));
+rpm_convert_to_sense(<<>>, Bits) ->
+    Bits;
+rpm_convert_to_sense(<<_, Chars/binary>>, Bits) ->
+    rpm_convert_to_sense(Chars, Bits).
 
 rpm_signatures(Headers) ->
   {_Magic,Index0, Data0} = rpm_pack_header(Headers),
@@ -677,7 +723,7 @@ rpm_header(Addons, Files) ->
   Headers = [
     {headeri18ntable, [<<"C">>]}
     ] ++
-      Addons ++ 
+      Addons ++
     [
     {buildtime, utc(erlang:universaltime())},
     {os, <<"linux">>},
