@@ -19,6 +19,7 @@
   url,
   description = "no description",
   maintainer,
+  pre_install,
   post_install,
   pre_uninstall,
   post_uninstall,
@@ -185,6 +186,11 @@ parse_args(["--url", URL|Args], #fpm{} = State) ->
 parse_args(["--gpg", GPG|Args], #fpm{} = State) ->
   parse_args(Args, State#fpm{gpg = GPG});
 
+parse_args(["--pre-install", V|Args], #fpm{} = State) ->
+  case file:read_file(V) of
+    {ok, Bin} -> parse_args(Args, State#fpm{pre_install = Bin});
+    {error, E} -> fpm_error("Failed to read pre-install ~s", [E])
+  end;
 
 parse_args(["--post-install", V|Args], #fpm{} = State) ->
   case file:read_file(V) of
@@ -488,7 +494,7 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
                               {requireflags, [X || {_, X, _} <- Deps]},
                               {size,        iolist_size(CPIO)}],
 
-  #fpm{post_install=PostInst,pre_uninstall=PreRm,post_uninstall=PostRm}=FPM,
+  #fpm{pre_install=PreInst,post_install=PostInst,pre_uninstall=PreRm,post_uninstall=PostRm}=FPM,
   #fpm{epoch = Epoch}=FPM,
   HeaderAddedTags2 = lists:foldl(fun
           ({T, V}, Acc) when V /= undefined ->
@@ -496,6 +502,7 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
           (_, Acc) -> Acc
     end, HeaderAddedTags,
         [
+            {preinstall, set_scriptlet_env(Name, Version, PreInst)},
             {postinstall, set_scriptlet_env(Name, Version, PostInst)},
             {preuninstall, set_scriptlet_env(Name, Version, PreRm)},
             {postuninstall, set_scriptlet_env(Name, Version, PostRm)},
