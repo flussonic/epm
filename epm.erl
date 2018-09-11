@@ -301,7 +301,7 @@ debian_conf_files(#fpm{config_files = Conf}) ->
   [[C,"\n"] || C <- Conf].
 
 debian_control_content(#fpm{name = Name, version = Version, maintainer = Maintainer, conflicts = Conflicts,
-  arch = Arch,
+  arch = Arch, depends = Depends,
   replaces = Replaces, category = Category, url = URL, description = Description, paths = Paths}) ->
   InstalledSize = lists:sum([
     fold_dir(Path, fun(FileName, AccIn) ->
@@ -316,6 +316,7 @@ debian_control_content(#fpm{name = Name, version = Version, maintainer = Maintai
   debian_header("Version", Version),
   debian_header("Architecture", Arch),
   debian_header("Maintainer", Maintainer),
+  debian_header("Depends", join_list(Depends)),
   debian_header("Conflicts", join_list(Conflicts)),
   debian_header("Replaces", join_list(Replaces)),
   debian_header("Standards-Version", "3.9.1"),
