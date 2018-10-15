@@ -470,7 +470,11 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
 
   % Need to sort files because mapFind will make bsearch to find them
   Files = rpm_load_file_list(Dirs),
-  CPIO = zlib:gzip(cpio(Files)),
+  FileSizes = file_sizes (Files),
+  UncompressedCPIO = cpio(Files),
+  UncompressedCPIOSize = iolist_size (UncompressedCPIO),
+  CPIO = zlib:gzip(UncompressedCPIO),
+  CPIOSize = iolist_size(CPIO),
 
   Info1 = [
     {summary, FPM#fpm.description},
@@ -493,7 +497,9 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
                               {requirename, [X || {X, _, _} <- Deps]},
                               {requireversion, [X || {_, _, X} <- Deps]},
                               {requireflags, [X || {_, X, _} <- Deps]},
-                              {size,        iolist_size(CPIO)}],
+                              {size, FileSizes},
+                              {archivesize, UncompressedCPIOSize}
+                             ],
 
   #fpm{pre_install=PreInst,post_install=PostInst,pre_uninstall=PreRm,post_uninstall=PostRm}=FPM,
   #fpm{epoch = Epoch}=FPM,
@@ -537,7 +543,7 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
 
 
   Signature = [{sha1_header,hex(crypto:hash(sha, [Header]))}] ++ GPGSign++
-    [{signature_size,iolist_size(Header) + iolist_size(CPIO)},
+    [{signature_size,iolist_size(Header) + CPIOSize},
     {md5_header,{bin,MD5}}],
 
 
@@ -598,6 +604,18 @@ rpm_pad(Data, N) ->
   Pad = binary:copy(<<0>>, iolist_size(Data) rem N),
   Pad.
 
+
+file_sizes (Files) ->
+  lists:foldl (fun(Path,A) ->
+                 {ok, #file_info{type = T, size = S}} =
+                    file:read_file_info(Path),
+                 case T of
+                   regular -> A + S;
+                   _ -> A
+                 end
+               end,
+               0,
+               Files).
 
 rpm_load_file_list(Dirs) ->
   Files1 = lists:usort(lists:flatmap(fun(Dir) -> rpm_list(Dir) end, Dirs)),
