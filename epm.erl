@@ -18,6 +18,7 @@
   buildhost = "localhost",
   url,
   description = "no description",
+  summary = "no summary",
   maintainer,
   pre_install,
   post_install,
@@ -174,6 +175,9 @@ parse_args(["-m", Desc|Args], #fpm{} = State) ->
 
 parse_args(["--maintainer", Desc|Args], #fpm{} = State) ->
   parse_args(Args, State#fpm{maintainer = Desc});
+
+parse_args(["--summary", Summary|Args], #fpm{} = State) ->
+  parse_args(Args, State#fpm{summary = Summary});
 
 parse_args(["--description", Desc|Args], #fpm{} = State) ->
   parse_args(Args, State#fpm{description = Desc});
@@ -473,7 +477,7 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
   CPIO = zlib:gzip(cpio(Files)),
 
   Info1 = [
-    {summary, FPM#fpm.description},
+    {summary, FPM#fpm.summary},
     {description, FPM#fpm.description},
     {buildhost, BHost},
     {vendor, FPM#fpm.vendor},
@@ -1095,6 +1099,7 @@ Options:
     --config-files CONFIG_FILES   Mark a file in the package as being a config file. This uses 'conffiles' in debs and %config in rpm. If you have multiple files to mark as configuration files, specify this flag multiple times.
     -a, --architecture ARCHITECTURE The architecture name. Usually matches 'uname -m'. For automatic values, you can use '-a all' or '-a native'. These two strings will be translated into the correct value for your platform and target package type.
     -m, --maintainer MAINTAINER   The maintainer of this package. (default: \"<max@flussonic.com>\")
+    --summary SUMMARY             One line summary of package. (default: \"no summary\")
     --description DESCRIPTION     Add a description for this package. You can include '
                                   ' sequences to indicate newline breaks. (default: \"no description\")
     --url URI                     Add a url for this package. (default: \"http://example.com/no-uri-given\")
