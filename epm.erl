@@ -31,9 +31,10 @@
   arch,
   cwd = ".",
   gpg,
-  paths = []
+  paths = [],
+  exclude_dirs = []
 }).
-
+-define (DEFAULT_EXCLUDE_DIRS, [ <<"etc">>, <<"etc/init.d">>, <<"opt">> ]).
 
 main([]) ->
   help(),
@@ -41,8 +42,19 @@ main([]) ->
 
 main(Args) ->
   State = getopt(Args),
-  make_package(State),
+  ResolvedState = resolve_defaults (State),
+  make_package(ResolvedState),
   ok.
+
+% function to resolve any defaulting of state
+resolve_defaults (State = #fpm {}) ->
+  % for excluded directories, create a unique sorted list
+  ExcludeDirsIn =
+    case State#fpm.exclude_dirs of
+      [] -> ?DEFAULT_EXCLUDE_DIRS;
+      E -> E
+    end,
+  State#fpm { exclude_dirs = lists:usort (ExcludeDirsIn) }.
 
 
 fpm_error(Format) ->
@@ -139,6 +151,8 @@ parse_args(["--vendor", L|Args], #fpm{} = State) ->
 parse_args(["--category", Desc|Args], #fpm{} = State) ->
   parse_args(Args, State#fpm{category = Desc});
 
+parse_args(["--exclude-dir", Dir|Args], #fpm{exclude_dirs = Dirs} = State) ->
+  parse_args(Args, State#fpm{exclude_dirs = Dirs ++ [list_to_binary(Dir)]});
 
 parse_args(["--depends", Dep|Args], #fpm{depends = Deps} = State) ->
   parse_args(Args, State#fpm{depends = Deps ++ [Dep]});
@@ -406,7 +420,7 @@ tar() ->
 
 
 
-rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version = Version0, arch = Arch0, release = Release0, provides = Provides0, depends = Deps0, buildhost = BHost0} = FPM) ->
+rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version = Version0, arch = Arch0, release = Release0, provides = Provides0, depends = Deps0, buildhost = BHost0, exclude_dirs = ExcludeDirs} = FPM) ->
   Arch1 = case Arch0 of
     "amd64" -> "x86_64";
     _ -> Arch0
@@ -469,7 +483,7 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
   end, Dirs0),
 
   % Need to sort files because mapFind will make bsearch to find them
-  Files = rpm_load_file_list(Dirs),
+  Files = rpm_load_file_list(Dirs, ExcludeDirs),
   CPIO = zlib:gzip(cpio(Files)),
 
   Info1 = [
@@ -599,16 +613,18 @@ rpm_pad(Data, N) ->
   Pad.
 
 
-rpm_load_file_list(Dirs) ->
-  Files1 = lists:usort(lists:flatmap(fun(Dir) -> rpm_list(Dir) end, Dirs)),
-  Files2 = Files1 -- [<<"etc">>, <<"etc/init.d">>, <<"opt">>],
+rpm_load_file_list(Dirs, ExcludeDirs) ->
+  % gather a list of regular files and directories
+  RpmList = lists:usort(lists:flatmap(fun(Dir) -> rpm_list(Dir) end, Dirs)),
+  % remove any excluded directories
+  Files2 = RpmList -- ExcludeDirs,
   Files2.
 
 rpm_list(Dir) ->
   Files1 = fold_dir(Dir, fun(P,L) -> [list_to_binary(P)|L] end, []),
-  Files2 = lists:filter(fun(Path) -> 
+  Files2 = lists:filter(fun(Path) ->
     {ok, #file_info{type = T}} = file:read_file_info(Path),
-    T == regular
+    T == regular orelse T == directory
   end, Files1),
   Files3 = lists:flatmap(fun(Path) ->
     rpm_ancestors(Path)
@@ -1093,6 +1109,7 @@ Options:
     --conflicts CONFLICTS         Other packages/versions this package conflicts with. This flag can specified multiple times.
     --replaces REPLACES           Other packages/versions this package replaces. This flag can be specified multiple times.
     --config-files CONFIG_FILES   Mark a file in the package as being a config file. This uses 'conffiles' in debs and %config in rpm. If you have multiple files to mark as configuration files, specify this flag multiple times.
+    --exclude-dir DIR             A directory to exclude listing in a package, by default this is etc, etc/init.d, and opt.  Value is assumed to be under '/' on target system.  This is mostly useful if you are installing things in standard places like /usr/bin or something like that.  You would add '--exclude-dir usr --exclude-dir usr/bin' so that you won't get errors on installation.  You can specify this multiple times, and specifying one time results the the defaults being removed. (default: [\"etc\", \"etc/init.d\", \"opt\"])
     -a, --architecture ARCHITECTURE The architecture name. Usually matches 'uname -m'. For automatic values, you can use '-a all' or '-a native'. These two strings will be translated into the correct value for your platform and target package type.
     -m, --maintainer MAINTAINER   The maintainer of this package. (default: \"<max@flussonic.com>\")
     --description DESCRIPTION     Add a description for this package. You can include '
