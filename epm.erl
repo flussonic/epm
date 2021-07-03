@@ -510,9 +510,7 @@ rpm(#fpm{paths = Dirs0, output = OutPath, force = Force, name = Name0, version =
             {epoch, Epoch}
         ]),
 
-  HeaderAddedTags3 = HeaderAddedTags2 ++ rpm_depends_tags(FPM),
-
-  Header = rpm_header(HeaderAddedTags3, Files),
+  Header = rpm_header(HeaderAddedTags2, Files),
   MD5 = crypto:hash(md5, [Header, CPIO]),
 
 
@@ -674,51 +672,6 @@ cpio_pack(Name, Size, Inode, Mode) ->
   end,
   ["070701", to_b(Inode), to_b(Mode), to_b(0), to_b(0), to_b(Nlinks), to_b(now_s()), to_b(Size), to_b(Major), to_b(0), to_b(Major), to_b(0),
   to_b(iolist_size(Name)+1), to_b(0), Name, 0, binary:copy(<<0>>, cpio_pad4(iolist_size(Name) + 1 + 110))].
-
-
-rpm_depends_tags(#fpm{depends=Depends}) ->
-    Deps = lists:foldl(fun(Depend, Acc) ->
-            case rpm_parse_depend(Depend) of
-                undefined -> Acc;
-                V -> [V | Acc]
-            end
-        end, [], Depends),
-    case lists:unzip3(Deps) of
-        {[], _, _} -> [];
-        {Names, Versions, Flags} ->
-            [
-                {requirename, Names},
-                {requireversion, Versions},
-                {requireflags, Flags}
-            ]
-    end.
-
-rpm_attr_calc([], Acc) -> Acc;
-rpm_attr_calc([$< | T], Acc) -> rpm_attr_calc(T, Acc + 2);
-rpm_attr_calc([$> | T], Acc) -> rpm_attr_calc(T, Acc + 4);
-rpm_attr_calc([$= | T], Acc) -> rpm_attr_calc(T, Acc + 8).
-
-rpm_parse_depend(L) ->
-    Trim = fun(V) -> string:strip(V, both, 32) end,
-    Bin = fun(V) ->
-        list_to_binary(Trim(V))
-    end,
-    Attr = fun(V) ->
-        T = Trim(V),
-        case length(T) > 2 of
-            true -> undefined;
-            false -> rpm_attr_calc(T, 0)
-        end
-    end,
-    case re:run(Trim(L),"^([^<=>]+)(([<=>]+)(.+))?$",[global,{capture,all,list}]) of
-        {match, [[_, Name]]} -> {Bin(Name), <<>>, 0};
-        {match, [[_, Name, _, Op, Version]]} ->
-            case Attr(Op) of
-                undefined -> undefined;
-                V -> {Bin(Name), Bin(Version), V}
-            end;
-        _ -> undefined
-    end.
 
 rpm_header(Addons, Files) ->
   Infos = [begin
